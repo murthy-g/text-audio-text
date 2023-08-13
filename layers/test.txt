@@ -1,0 +1,10 @@
+File size of tensorflow-jsonify.zip: 
+File size of jsonify-jsonify.zip: 4.0K
+File size of torch-librosa.zip: 145M
+File size of transformers-pydub.zip:  26M
+File size of torchaudio-gTTS.zip:  63M
+File size of pillow-keras.zip: 4.5M
+File size of gTTS-gTTS.zip: 628K
+File size of gTTS-gTTS.zip: 628K
+File size of gtts-gtts.zip: 628K
+File size of gtts-gtts.zip: 628K

@@ -1,0 +1,6 @@
+gtts
+# keras
+# torch,librosa
+# transformers,pydub
+# torchaudio,gTTS
+# pillow,jsonify
