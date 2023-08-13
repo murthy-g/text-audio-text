@@ -1,0 +1,10 @@
+keras
+torch
+transformers
+tensorflow
+librosa
+pydub
+torchaudio
+Flask
+gTTS
+jsonify
