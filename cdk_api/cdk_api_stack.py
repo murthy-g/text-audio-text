@@ -1,53 +1,66 @@
 import os
+import boto3
 from aws_cdk import (
     Stack,
     aws_apigateway as apigateway,
     aws_lambda as _lambda,
     aws_iam as _iam,
     aws_s3 as s3,
+    aws_logs as logs,
     # core,
     # aws_s3_deployment as s3deploy,
 )
+
 from constructs import Construct
 
 class CdkApiStack(Stack):
 
-    def create_layers(self, layers_dir, runtime):
-        layers = []
+    def get_all_keys_from_s3_bucket(bucket_name):
+        s3_client = boto3.client('s3')
+        
+        keys = []
+        continuation_token = None
 
-        # Get a list of all zip files in the directory
-        zip_files = [file for file in os.listdir(layers_dir) if file.endswith('.zip')]
+        while True:
+            list_objects_kwargs = {'Bucket': bucket_name}
+            if continuation_token:
+                list_objects_kwargs['ContinuationToken'] = continuation_token
 
-        # Iterate through the zip files and create layers
-        for zip_file in zip_files:
-            layer_name = os.path.splitext(zip_file)[0]  # Get layer name from the zip file name
+            response = s3_client.list_objects_v2(**list_objects_kwargs)
 
-            # Create the layer using the zip file
-            layer = _lambda.LayerVersion(
-                self,
-                f"{layer_name}Layer",
-                code=_lambda.Code.from_asset(os.path.join(layers_dir, zip_file)),
-                compatible_runtimes=[runtime],
-                description=f"A layer for {layer_name}",
-            )
-            layers.append(layer)  # Append the layer to the list
+            if 'Contents' in response:
+                for obj in response['Contents']:
+                    keys.append(obj['Key'])
 
-        return layers
+            if not response.get('IsTruncated'):  # Once all keys are fetched
+                break
+
+            continuation_token = response.get('NextContinuationToken')
+
+        return keys
 
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-
-        # Usage
-        layers1_dir = './layers/layers/layer1'
-        layers2_dir = './layers/layers/layer2'
-        runtime = _lambda.Runtime.PYTHON_3_11
-
-        layers1 = CdkApiStack.create_layers(self, layers1_dir, runtime)
-        layers2 = CdkApiStack.create_layers(self, layers2_dir, runtime)
         
         #create s3 bucket
         bucket = s3.Bucket(self, "AudioBucket")
+        layer_bucket = s3.Bucket.from_bucket_name(self, 'ImportedBucket', 'zoom-api-layers')
+
+        layer_zip_files = [
+            'charset_normalizer_urllib3.zip',
+            'gtts_soundfile_boto3.zip',
+            'torch.zip',
+            'torchaudio_pillow_jsonify.zip',
+            'transformers.zip'
+        ]
+
+        # Create LayerVersion objects for each zipped layer
+        layer_objects = []
+        for zip_file in layer_zip_files:
+            layer_code = _lambda.Code.from_bucket(layer_bucket, zip_file)
+            layer = _lambda.LayerVersion(self, zip_file, code=layer_code)
+            layer_objects.append(layer)
 
 
         #create iam role to write files into s3 bucket from lambda function
@@ -69,9 +82,9 @@ class CdkApiStack(Stack):
         generate_audio_lambda = _lambda.Function(
             self,
             "GenerateAudioLambda",
-            runtime=_lambda.Runtime.PYTHON_3_11,
+            runtime=_lambda.Runtime.PYTHON_3_8,
             code=_lambda.Code.from_asset("handlers"),
-            layers=layers1,
+            layers=layer_objects,
             handler="generateAudio.handler",
             role=generate_audio_lambda_role,
             environment={
@@ -83,25 +96,15 @@ class CdkApiStack(Stack):
         whisper_lambda = _lambda.Function(
             self,
             "WhisperLambda",
-            runtime=_lambda.Runtime.PYTHON_3_11,
+            runtime=_lambda.Runtime.PYTHON_3_8,
             code=_lambda.Code.from_asset("handlers"),
             handler="whisper.handler",
             role=generate_audio_lambda_role,
             environment={
                 "BUCKET_NAME": bucket.bucket_name,
             },
-            layers=layers2
+            layers=layer_objects,
         )
-
-        
-
-        # Add the 'flask' library to the Lambda deployment package
-        # _lambda.Function.add_to_role_policy(
-        #     statement=_iam.PolicyStatement(
-        #         actions=["s3:GetObject"],  # Adjust the permissions as needed
-        #         resources=["*"],
-        #     )
-        # )
 
         #create api gateway
         api = apigateway.RestApi(
@@ -120,3 +123,17 @@ class CdkApiStack(Stack):
         api.root.add_resource("whisper").add_method("POST", whisper_integration)
 
         
+        log_group = logs.LogGroup(self, "ApiGatewayAccessLogs")
+
+        api_gateway_logging_role = _iam.Role(
+            self,
+            "ApiGatewayLoggingRole",
+            assumed_by=_iam.ServicePrincipal("apigateway.amazonaws.com"),
+        )
+
+        api_gateway_logging_role.add_to_policy(
+            _iam.PolicyStatement(
+                actions=["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"],
+                resources=[log_group.log_group_arn]
+            )
+        )

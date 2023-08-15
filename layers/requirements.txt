@@ -1,6 +1,7 @@
 gtts
-# keras
-# torch,librosa
-# transformers,pydub
-# torchaudio,gTTS
-# pillow,jsonify
+keras
+torch,librosa
+transformers,pydub
+torchaudio,gTTS
+pillow,jsonify
+charset_normalizer
